@@ -1,0 +1,125 @@
+# ============================================================
+# 猎场系统 V6.0 — 策略参数配置
+# ============================================================
+
+# ----------------------------------------------------------
+# 信号扫描器权重（用于多信号加权融合）
+# ----------------------------------------------------------
+signal_weights:
+  technical:
+    rsi_oversold: 0.15
+    macd_golden_cross: 0.10
+    bollinger_lower: 0.10
+    v_pattern: 0.08
+    bottom_fractal: 0.07
+  fund_flow:
+    north_flow: 0.12
+    volume_ratio_anomaly: 0.08
+    turnover_rate_anomaly: 0.07
+    big_order_inflow: 0.05
+  sentiment:
+    nlp_score: 0.08
+    fear_greed_index: 0.05
+    advance_decline_ratio: 0.03
+  ai_enhanced:
+    anomaly_detection: 0.02
+    lstm_prediction: 0.02
+
+# ----------------------------------------------------------
+# 技术指标参数
+# ----------------------------------------------------------
+technical_indicators:
+  rsi:
+    period: 14
+    oversold_threshold: 30
+    overbought_threshold: 70
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  bollinger:
+    period: 20
+    std_dev: 2.0
+  ma:
+    short: 5
+    medium: 20
+    long: 60
+  volume_ratio:
+    period: 5
+    anomaly_threshold: 2.0   # 量比>2.0视为异动
+  turnover_rate:
+    max_daily: 10.0          # 日换手率>10%放量下跌拒绝
+    min_daily: 0.5           # 换手率<0.5%流动性警告
+
+# ----------------------------------------------------------
+# V型反转识别参数
+# ----------------------------------------------------------
+v_pattern:
+  lookback_days: 20
+  decline_min_pct: -15.0     # 至少跌15%
+  recovery_min_pct: 5.0      # 至少反弹5%
+  volume_confirm: true       # 需要量能确认
+
+# ----------------------------------------------------------
+# 底分型识别参数
+# ----------------------------------------------------------
+bottom_fractal:
+  lookback_days: 10
+  min_left_bars: 3
+  min_right_bars: 3
+  volume_shrink: true
+
+# ----------------------------------------------------------
+# 北向资金参数
+# ----------------------------------------------------------
+north_flow:
+  lookback_days: 5
+  consecutive_buy_days: 3     # 连续买入天数阈值
+  min_net_inflow: 1000        # 最小净流入（万元）
+
+# ----------------------------------------------------------
+# 市场情绪参数
+# ----------------------------------------------------------
+market_sentiment:
+  fear_greed:
+    extreme_fear: 20          # 极度恐惧阈值
+    extreme_greed: 80         # 极度贪婪阈值
+    normal_low: 35
+    normal_high: 65
+  advance_decline:
+    extreme_bearish: 0.3      # 涨跌比<0.3视为极端
+  limit_down_count:
+    danger: 100               # 跌停>100家熔断
+
+# ----------------------------------------------------------
+# AI 模型参数
+# ----------------------------------------------------------
+ai_models:
+  xgboost:
+    score_threshold: 40       # 最低评分（低于此分拒绝）
+    n_estimators: 200
+    max_depth: 6
+    learning_rate: 0.05
+  lstm:
+    sequence_length: 60       # 输入序列长度（天）
+    prediction_horizons: [1, 3, 5]  # 预测周期
+    confidence_threshold: 0.55 # 置信度阈值
+  catboost:
+    risk_threshold: 0.60      # 5日跌>5%概率>60%拒绝
+    iterations: 300
+  ppo:
+    max_position_pct: 0.70
+    risk_aversion: 0.5
+
+# ----------------------------------------------------------
+# 可转债专项
+# ----------------------------------------------------------
+convertible_bond:
+  double_low_max: 130         # 双低值上限
+  premium_rate_max: 30.0      # 溢价率上限（%）
+  price_min: 100.0
+  price_max: 130.0
+  remaining_years_min: 0.5    # 剩余年限
+  credit_rating_min: "A+"    # 最低信用评级
+  stop_loss_pct: -0.03        # 止损线
+  take_profit_pct: 0.05       # 短线止盈线

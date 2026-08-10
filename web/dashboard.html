@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>猎场系统 V6.0 — Genesis</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--green:#3fb950;--red:#f85149;--yellow:#d2991d;--accent:#58a6ff}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.header{background:var(--card);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100}
+.header h1{font-size:20px;font-weight:600}.header .badge{padding:4px 12px;border-radius:12px;font-size:12px}
+.badge.live{background:#1b3a1b;color:var(--green)}.badge.paper{background:#1a2a3a;color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:24px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px}
+.card h3{font-size:14px;color:#8b949e;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.stat-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #21262d}
+.stat-row:last-child{border-bottom:none}
+.stat-value{font-weight:600;font-variant-numeric:tabular-nums}
+.up{color:var(--green)}.down{color:var(--red)}.warn{color:var(--yellow)}
+.chart-container{width:100%;height:350px}
+.positions-table{width:100%;border-collapse:collapse;font-size:13px}
+.positions-table th{text-align:left;padding:8px 12px;border-bottom:2px solid var(--border);color:#8b949e;font-weight:500}
+.positions-table td{padding:8px 12px;border-bottom:1px solid #21262d}
+.btn{padding:8px 16px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer;font-size:13px;margin-right:8px}
+.btn:hover{background:#21262d}.btn.danger{border-color:var(--red);color:var(--red)}.btn.primary{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1> 猎场系统 V6.0 <span style="font-weight:400;color:#8b949e;font-size:14px">Genesis</span></h1>
+  <div>
+    <button class="btn primary" onclick="action('resume')">▶ 恢复交易</button>
+    <button class="btn danger" onclick="action('pause')">⏸ 暂停交易</button>
+    <span id="statusBadge" class="badge paper">加载中...</span>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>💰 账户概览</h3>
+    <div id="accountStats"></div>
+  </div>
+  <div class="card">
+    <h3>🛡️ 风控状态</h3>
+    <div id="riskStatus"></div>
+  </div>
+  <div class="card">
+    <h3>📊 收益曲线</h3>
+    <div id="pnlChart" class="chart-container"></div>
+  </div>
+  <div class="card">
+    <h3>📋 当前持仓</h3>
+    <div id="positionsTable"></div>
+  </div>
+  <div class="card">
+    <h3>🎯 最新信号</h3>
+    <div id="signalsList"></div>
+  </div>
+  <div class="card">
+    <h3>📈 策略进化</h3>
+    <div id="evolutionData"></div>
+  </div>
+</div>
+
+<script>
+async function fetchJSON(url){try{const r=await fetch(url);return r.json()}catch(e){return{}}}
+async function refresh(){
+  const [status,portfolio,signals,risk,evolution]=await Promise.all([
+    fetchJSON('/api/status'),fetchJSON('/api/portfolio'),
+    fetchJSON('/api/signals'),fetchJSON('/api/risk'),fetchJSON('/api/evolution')
+  ]);
+
+  document.getElementById('statusBadge').textContent=status.state||'unknown';
+  document.getElementById('statusBadge').className='badge '+(status.state==='running'?'live':'paper');
+
+  // Account
+  const snap=portfolio.snapshot||{};
+  document.getElementById('accountStats').innerHTML=`
+    <div class="stat-row"><span>总资产</span><span class="stat-value">${(snap.total_value||0).toLocaleString()} 元</span></div>
+    <div class="stat-row"><span>持仓市值</span><span class="stat-value">${(snap.position_value||0).toLocaleString()} 元</span></div>
+    <div class="stat-row"><span>现金</span><span class="stat-value">${(snap.cash||0).toLocaleString()} 元</span></div>
+    <div class="stat-row"><span>今日盈亏</span><span class="stat-value ${(snap.daily_pnl||0)>=0?'up':'down'}">${(snap.daily_pnl||0).toLocaleString()} (${(snap.daily_pnl_pct||0).toFixed(2)}%)</span></div>
+    <div class="stat-row"><span>累计盈亏</span><span class="stat-value ${(snap.total_pnl||0)>=0?'up':'down'}">${(snap.total_pnl||0).toLocaleString()} (${(snap.total_pnl_pct||0).toFixed(2)}%)</span></div>
+  `;
+
+  // Risk
+  const breakers=risk.breakers||[];
+  document.getElementById('riskStatus').innerHTML=breakers.length===0
+    ? '<div style="color:var(--green)">✅ 所有系统正常，无熔断</div>'
+    : breakers.map(b=>`<div class="stat-row"><span>L${b.level} ${b.name}</span><span class="stat-value warn">${b.action}</span></div>`).join('');
+
+  // Positions
+  const positions=portfolio.positions||[];
+  document.getElementById('positionsTable').innerHTML=positions.length===0
+    ? '<div style="color:#8b949e">暂无持仓</div>'
+    : `<table class="positions-table"><tr><th>代码</th><th>名称</th><th>持仓</th><th>成本</th><th>现价</th><th>市值</th><th>盈亏%</th></tr>`
+      +positions.map(p=>`<tr><td>${p.ts_code}</td><td>${p.name||''}</td><td>${p.volume||0}</td><td>${(p.avg_cost||0).toFixed(2)}</td><td>${(p.current_price||0).toFixed(2)}</td><td>${(p.market_value||0).toLocaleString()}</td><td class="${(p.pnl_pct||0)>=0?'up':'down'}">${(p.pnl_pct||0).toFixed(2)}%</td></tr>`).join('')
+      +'</table>';
+
+  // Signals
+  const signals=signals.signals||[];
+  document.getElementById('signalsList').innerHTML=signals.length===0
+    ? '<div style="color:#8b949e">暂无信号</div>'
+    : signals.slice(0,10).map(s=>`<div class="stat-row"><span>${s.ts_code} <small>${s.signal_type}</small></span><span class="stat-value">${s.score||0}分</span></div>`).join('');
+
+  // Evolution
+  const records=evolution.records||[];
+  document.getElementById('evolutionData').innerHTML=records.length===0
+    ? '<div style="color:#8b949e">暂无数据</div>'
+    : records.slice(0,5).map(r=>`<div class="stat-row"><span>${r.strategy_name} <small>${r.period}</small></span><span class="stat-value ${(r.total_return||0)>=0?'up':'down'}">${(r.total_return||0).toFixed(2)}%</span></div>`).join('');
+}
+
+async function action(act){await fetch('/api/control/'+act,{method:'POST'});refresh()}
+refresh();setInterval(refresh,10000);
+</script>
+</body>
+</html>

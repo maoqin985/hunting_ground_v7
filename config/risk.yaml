@@ -1,0 +1,145 @@
+# ============================================================
+# 猎场系统 V6.0 — 五层递进风控配置
+# ============================================================
+
+# ----------------------------------------------------------
+# L0: 信号防线（继承 V5.2 十层 + 新增 AI 防线）
+# ----------------------------------------------------------
+signal_defense:
+  layers:
+    - id: 1
+      name: "市值过滤"
+      market_cap_min: 10.0    # 亿
+      market_cap_max: 50.0    # ≤50亿小盘股
+      action: "reject"
+    - id: 2
+      name: "数据完整性"
+      required_fields: ["rsi", "turnover_rate", "volume_ratio", "max_drawdown"]
+      action: "reject"
+    - id: 3
+      name: "假数据检测"
+      conditions:
+        rsi: 50.0
+        turnover_rate: 0.0
+        volume_ratio: 1.0
+      match_mode: "all"       # all=全部命中才触发, any=任一命中
+      action: "reject"
+    - id: 4
+      name: "涨停过滤"
+      max_change_pct: 9.0
+      exclude_limit_up: true
+      action: "reject"
+    - id: 5
+      name: "评分过滤"
+      min_score: 40
+      action: "reject"
+    - id: 6
+      name: "宏观情绪"
+      fear_greed_min: 20
+      fear_greed_max: 80
+      action: "warn"          # warn=警告但不阻止, reject=直接拒绝
+    - id: 7
+      name: "新闻研判"
+      nlp_sentiment_threshold: -0.5
+      action: "reject"
+    - id: 8
+      name: "基本面黑名单"
+      blacklist_keywords: ["减持", "立案", "亏损", "ST", "*ST", "退市", "问询函", "监管函"]
+      action: "reject"
+    - id: 9
+      name: "缩量止跌"
+      max_turnover_rate: 10.0   # 换手率>10%放量下跌拒绝
+      action: "reject"
+    - id: 10
+      name: "底部横盘"
+      new_low_lookback: 3       # 3日内创新低拒绝
+      action: "reject"
+    - id: 11
+      name: "AI风险分类"
+      catboost_risk_threshold: 0.60  # 5日跌>5%概率>60%
+      action: "reject"
+    - id: 12
+      name: "流动性检查"
+      min_daily_amount: 3000    # 日均成交额（万元）200万资金需更高流动性
+      action: "reject"
+
+# ----------------------------------------------------------
+# L1-L5: 五层递进熔断
+# ----------------------------------------------------------
+circuit_breakers:
+  # L1: 个股硬止损
+  - level: 1
+    name: "个股硬止损"
+    trigger: "single_stock_pnl_pct <= -0.05"  # 跌幅≥5%
+    action: "close_position"     # 立即平仓该股
+    cooldown_seconds: 0          # 无冷却，同股可再买（需评分≥60）
+    auto_resume: true
+
+  # L2: 个股日度亏损
+  - level: 2
+    name: "个股日度亏损"
+    trigger: "single_stock_daily_pnl_pct <= -0.03"
+    action: "ban_stock_1day"     # 禁止该股当日再交易
+    cooldown_seconds: 86400      # 次日解除
+    auto_resume: true
+
+  # L3: 组合日度亏损
+  - level: 3
+    name: "组合日度亏损"
+    trigger: "portfolio_daily_pnl_pct <= -0.04"  # 日亏4%≈8万
+    action: "no_new_position"    # 禁止新开仓，只平不买
+    cooldown_seconds: 86400
+    auto_resume: true
+
+  # L4: 组合周度亏损
+  - level: 4
+    name: "组合周度亏损"
+    trigger: "portfolio_weekly_pnl_pct <= -0.08"  # 周亏8%≈16万
+    action: "close_all_halt"     # 全部平仓，本周停止交易
+    cooldown_seconds: 604800     # 下周自动恢复
+    auto_resume: true
+    require_manual_confirm: true # 需要人工确认才能恢复
+
+  # L5: 大盘熔断
+  - level: 5
+    name: "大盘熔断"
+    trigger: "hs300_change_pct <= -0.05 OR limit_down_count >= 100"
+    action: "close_all_pause"    # 全部清仓 + 系统暂停
+    cooldown_seconds: 86400
+    auto_resume: false
+    resume_condition: "hs300_change_pct > -0.02 AND limit_down_count < 50"
+
+# ----------------------------------------------------------
+# 止损止盈参数
+# ----------------------------------------------------------
+stop_loss:
+  check_interval: 60            # 每秒检查
+  a_share:
+    hard_stop: -0.05            # -5% 硬止损
+    trailing_stop: -0.07        # 从最高点回撤7%
+    trailing_activate: 0.05     # 盈利5%后激活移动止损
+  convertible_bond:
+    hard_stop: -0.03            # -3% 硬止损（转债流动性好）
+    trailing_stop: -0.04
+
+take_profit:
+  a_share:
+    target_pct: 0.20            # +20% 目标
+    trailing: true              # 启用移动止盈
+  convertible_bond:
+    target_pct: 0.05            # +5% 短线止盈
+
+# ----------------------------------------------------------
+# T+1 保护
+# ----------------------------------------------------------
+t1_protection:
+  enabled: true
+  rule: "当天买入的股票不触发止损（次日才生效）"
+
+# ----------------------------------------------------------
+# 熔断历史记录
+# ----------------------------------------------------------
+audit:
+  log_trigger_events: true
+  log_all_decisions: true
+  retention_days: 365

@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.spec
+venv/
+.venv/
+
+# Data (large files)
+data/*.db
+data/models/*.pkl
+data/models/*.pt
+data/models/*.zip
+data/daily_signals/
+
+# Logs
+logs/
+*.log
+
+# Backup
+backup/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment
+.env
+.env.local
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Temp
+tmp/
+temp/
+*.tmp
