@@ -9,9 +9,10 @@ from .position_rl import RLTrainer, RLPredictor
 from .risk_cls_catboost import CatBoostRiskClassifier
 from .macro_llm import MacroLLM
 from .ensemble import ModelEnsemble
+from .deepseek_decision import DeepSeekDecisionEnsemble
 
 __all__ = [
     "FeatureEngine", "XGBoostScorer", "LSTMPredictor",
     "RLTrainer", "RLPredictor", "CatBoostRiskClassifier",
-    "MacroLLM", "ModelEnsemble",
+    "MacroLLM", "ModelEnsemble", "DeepSeekDecisionEnsemble",
 ]

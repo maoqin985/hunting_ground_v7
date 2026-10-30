@@ -44,3 +44,17 @@ desktop.ini
 tmp/
 temp/
 *.tmp
+
+# Local credentials and runtime artifacts
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+.pytest_cache/
+.coverage
+htmlcov/
+runtime/
+hunting_ground_runtime/

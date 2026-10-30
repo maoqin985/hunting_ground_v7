@@ -16,11 +16,13 @@ logger = logging.getLogger(__name__)
 class Engine:
     """系统主引擎 — 管理所有子系统生命周期"""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, account_id: str = None):
         self.config = config
+        self.account_id = account_id  # V7.0: per-account engine
         self.state = "stopped"
         self.event_bus = get_event_bus()
-        self.scheduler = Scheduler(event_bus=self.event_bus)
+        from data.trading_calendar import TradingCalendar
+        self.scheduler = Scheduler(event_bus=self.event_bus, trading_calendar=TradingCalendar())
         self._subsystems = {}
         self._startup_time = None
 
@@ -35,14 +37,16 @@ class Engine:
 
         mode = self.config.get('system', {}).get('mode', 'paper')
         capital = self.config.get('capital', {}).get('total', 0)
+        account_tag = f" [{self.account_id}]" if self.account_id else ""
         logger.info("=" * 60)
-        logger.info(f"  猎场系统 V6.0 'Genesis' 启动")
+        logger.info(f"  猎场系统 V7.0 'Genesis'{account_tag} 启动")
         logger.info(f"  模式: {mode}  |  资金: {capital:,.0f} 元")
         logger.info("=" * 60)
 
         self._setup_signal_handlers()
 
-        await self.event_bus.publish(Event(EventType.SYSTEM_STARTUP, data={"config": self.config}))
+        await self.event_bus.publish(Event(EventType.SYSTEM_STARTUP,
+            data={"config": self.config}, account_id=self.account_id))
 
         asyncio.create_task(self.scheduler.start())
 
@@ -54,7 +58,8 @@ class Engine:
         if self.state != "running":
             return
         self.state = "stopping"
-        await self.event_bus.publish(Event(EventType.SYSTEM_SHUTDOWN, data={"reason": "user_requested"}))
+        await self.event_bus.publish(Event(EventType.SYSTEM_SHUTDOWN,
+            data={"reason": "user_requested"}, account_id=self.account_id))
         await self.scheduler.stop()
         self.state = "stopped"
         logger.info("Engine stopped")
@@ -83,6 +88,7 @@ class Engine:
             uptime = asyncio.get_event_loop().time() - self._startup_time
         return {
             "state": self.state,
+            "account_id": self.account_id,
             "uptime_seconds": round(uptime, 1),
             "event_bus": self.event_bus.get_stats(),
             "scheduler": self.scheduler.get_stats(),

@@ -1,4 +1,4 @@
-# 猎场系统 V6.0 "Genesis"
+# 猎场系统 V7.0 "Genesis"
 
 **AI 原生量化交易系统** — 专为 A股小盘股（≤50亿市值）设计
 
@@ -6,6 +6,15 @@
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
+
+
+## V7 部署与操作
+
+完整安装、凭证配置、Windows/Linux 启动、连接状态检查、备份恢复及故障处理见 **[部署与操作手册](docs/DEPLOYMENT.md)**。
+
+默认通过 `python main.py --mode v7` 启动完整多账户模拟交易系统及 Web 面板（http://localhost:8501/）。仅 `--mode web` 启动面板，不启动完整引擎。
+
+当前 V7 使用原规则决策，加可选 DeepSeek 受限复核；Tushare MCP 为主数据源，腾讯/新浪为备用。下列 AI 模块为仓库提供的能力，是否启用取决于启动路径及训练模型配置。源码不包含个人数据库、运行日志或真实 API 密钥；`.env.example` 不会被程序自动加载。
 
 ## 特性
 
@@ -24,13 +33,16 @@
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 配置 Tushare Token（可选，免费 AkShare 自动降级）
-set TUSHARE_TOKEN=your_token_here
+# 2. 配置 Tushare MCP Token（主数据源；实时接口不可用时自动降级到腾讯 HTTP/WebSocket）
+# PowerShell:
+$env:TUSHARE_TOKEN = "your_tushare_token"
+# 可选：启用 DeepSeek 受限决策复核（原规则仍是买入门槛）
+$env:DEEPSEEK_API_KEY = "your_deepseek_key"
 
-# 3. 启动模拟交易
-python main.py --mode paper
+# 3. 启动 V7 多账户模拟交易
+python main.py --mode v7
 
-# 4. 启动 Web 面板
+# 4. 仅需要独立 Web 面板时（不要与 V7 同时占用 8501）
 python main.py --mode web
 # 浏览器打开 http://localhost:8501
 

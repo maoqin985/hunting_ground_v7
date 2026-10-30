@@ -55,16 +55,21 @@ class ScheduledTask:
 class Scheduler:
     """异步任务调度器"""
 
-    def __init__(self, event_bus=None):
+    def __init__(self, event_bus=None, trading_calendar=None):
         self._tasks: Dict[str, ScheduledTask] = {}
         self._running = False
         self._tick_interval = 1.0
         self._event_bus = event_bus
+        self._trading_calendar = trading_calendar  # 交易日历（含节假日）
 
         self.trading_sessions = [
             (time(9, 30), time(11, 30)),
             (time(13, 0), time(15, 0)),
         ]
+
+    def set_trading_calendar(self, trading_calendar):
+        """注入交易日历对象（需提供 is_trading_day(date) 方法）"""
+        self._trading_calendar = trading_calendar
 
     def add_task(
         self,
@@ -104,9 +109,27 @@ class Scheduler:
         if name in self._tasks:
             self._tasks[name].enabled = False
 
+    def set_task_interval(self, name: str, interval_seconds: float) -> bool:
+        """运行时动态修改任务间隔（下次调度立即生效）"""
+        task = self._tasks.get(name)
+        if not task:
+            logger.warning(f"Task '{name}' not found, cannot change interval")
+            return False
+        task.interval_seconds = float(interval_seconds)
+        task._next_run = datetime.now() + timedelta(seconds=task.interval_seconds)
+        logger.info(f"Task '{name}' interval changed to {task.interval_seconds}s")
+        return True
+
+    def get_task_interval(self, name: str) -> Optional[float]:
+        task = self._tasks.get(name)
+        return task.interval_seconds if task else None
+
     def is_trading_session(self, now: Optional[datetime] = None) -> bool:
         if now is None:
             now = datetime.now()
+        # A股周末 + 法定节假日休市
+        if not self.is_trading_day(now):
+            return False
         ct = now.time()
         for start, end in self.trading_sessions:
             if start <= ct <= end:
@@ -117,6 +140,16 @@ class Scheduler:
         if now is None:
             now = datetime.now()
         return now.weekday() < 5
+
+    def is_trading_day(self, now: Optional[datetime] = None) -> bool:
+        """周末 + 法定节假日休市。未注入日历则退化为仅周末判断。"""
+        if now is None:
+            now = datetime.now()
+        if now.weekday() >= 5:
+            return False
+        if self._trading_calendar is not None:
+            return self._trading_calendar.is_trading_day(now.date())
+        return True
 
     async def start(self):
         self._running = True
@@ -156,13 +189,24 @@ class Scheduler:
                     task.record_error()
 
     def get_stats(self) -> Dict:
+        now = datetime.now()
+        cal = self._trading_calendar
+        source = getattr(cal, 'source', 'none') if cal else 'none'
+        if source == 'api':
+            cal_days = len(cal.trading_days) if hasattr(cal, 'trading_days') else 0
+        else:
+            cal_days = len(cal.holidays) if (cal and hasattr(cal, 'holidays')) else 0
         return {
             "total_tasks": len(self._tasks),
             "enabled_tasks": sum(1 for t in self._tasks.values() if t.enabled),
             "running": self._running,
+            "trading_day": self.is_trading_day(now),
+            "calendar_source": source,
+            "calendar_days": cal_days,
             "tasks": {
                 name: {
                     "enabled": t.enabled,
+                    "interval_seconds": t.interval_seconds,
                     "run_count": t._run_count,
                     "error_count": t._error_count,
                     "last_run": t._last_run.isoformat() if t._last_run else None,

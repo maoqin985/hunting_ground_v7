@@ -71,14 +71,15 @@ instruments:
 # ----------------------------------------------------------
 data_sources:
   primary:
-    name: "tushare"
-    token: "${TUSHARE_TOKEN}"   # 环境变量
-    rate_limit: 200              # 每分钟请求上限
+    name: "tushare"              # Tushare MCP 主数据源
+    mcp_url: "https://api.tushare.pro/mcp/"
+    token: "${TUSHARE_TOKEN}"    # 仅作环境变量占位符，不保存真实密钥
+    rate_limit: 200
   fallback:
-    name: "akshare"
+    name: "tencent"              # MCP 不支持/不可用时的 HTTP 备选
     rate_limit: 60
   realtime:
-    name: "tencent_websocket"
+    name: "tencent_http_websocket" # Tushare MCP 失败时的实时行情备选
     symbols_batch_size: 50
   news:
     name: "eastmoney"
@@ -88,8 +89,8 @@ data_sources:
 # 调度配置
 # ----------------------------------------------------------
 schedule:
-  market_scan_interval: 1200    # 全市场扫描间隔（秒）20分钟
-  flash_scan_interval: 300      # 异动扫描间隔 5分钟
+  market_scan_interval: 60      # 全市场扫描间隔（秒）1分钟全覆盖
+  flash_scan_interval: 60        # 异动扫描间隔 1分钟
   news_fetch_interval: 300      # 新闻抓取间隔
   data_sync_interval: 1200      # 数据同步间隔
   stop_loss_check_interval: 60  # 止损检查间隔
@@ -141,3 +142,22 @@ llm:
     api_key: "${DEEPSEEK_API_KEY}"
     api_base: "https://api.deepseek.com/v1"
     fallback: true  # 本地不可用时自动切换
+
+# ----------------------------------------------------------
+# 交易决策复核（原规则为硬门槛，DeepSeek 只做受限确认/否决）
+# ----------------------------------------------------------
+decision:
+  provider: "deepseek"
+  enabled: true
+  model: "deepseek-chat"
+  api_key: "${DEEPSEEK_API_KEY}"  # 只从环境变量读取，不保存真实密钥
+  api_base: "https://api.deepseek.com/v1"
+  timeout_seconds: 20
+  min_confidence: 0.60
+  max_score_adjustment: 10
+  min_position_multiplier: 0.50
+  max_position_multiplier: 1.00
+  allow_veto: true
+  self_tuning:
+    enabled: true
+    max_threshold_adjustment: 5

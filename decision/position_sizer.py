@@ -1,5 +1,5 @@
 """
-猎场系统 V6.0 — 仓位计算器（适配 2万 小资金）
+猎场系统 V7.0 — 仓位计算器（per-account 资金）
 Kelly公式 + 波动率调整 + 小资金约束
 """
 
@@ -13,19 +13,24 @@ logger = logging.getLogger(__name__)
 
 class PositionSizer:
     """
-    仓位计算引擎（200万资金 / 50亿以下小盘股专用）
-    - 最大持仓 6 只，每只 ≤25%（约50万）
+    仓位计算引擎（per-account 资金）
     - Kelly公式 + 波动率调整 + 流动性约束
+    - 支持显式 capital/limits 覆盖（V7.0 per-account）
     """
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None,
+                 total_capital: float = None,
+                 max_positions: int = None,
+                 max_single_pct: float = None,
+                 min_cash_pct: float = None):
         self.config = config or {}
-        cap_cfg = config.get("capital", {})
+        cap_cfg = self.config.get("capital", {})
 
-        self.total_capital = cap_cfg.get("total", 2000000.0)
-        self.max_positions = cap_cfg.get("max_positions", 6)
-        self.max_single_pct = cap_cfg.get("max_single_position_pct", 0.25)
-        self.min_cash_pct = cap_cfg.get("min_cash_reserve_pct", 0.10)
+        # V7.0: 显式参数优先于 config
+        self.total_capital = total_capital or cap_cfg.get("total", 2000000.0)
+        self.max_positions = max_positions or cap_cfg.get("max_positions", 6)
+        self.max_single_pct = max_single_pct or cap_cfg.get("max_single_position_pct", 0.25)
+        self.min_cash_pct = min_cash_pct or cap_cfg.get("min_cash_reserve_pct", 0.10)
 
     def calculate(self, ts_code: str, price: float,
                   signal_score: float,

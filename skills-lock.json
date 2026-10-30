@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "argent-metro-debugger": {
+      "source": "software-mansion/argent",
+      "sourceType": "github",
+      "skillPath": "packages/skills/skills/argent-metro-debugger/SKILL.md",
+      "computedHash": "935e96e1c3425f87404f49ba36048eb2f0055b292da1cfd2fd5f9b5d5ba13da9"
+    },
+    "explore-run": {
+      "source": "lllllllama/rigorpilot-skills",
+      "sourceType": "github",
+      "skillPath": "skills/explore-run/SKILL.md",
+      "computedHash": "3cae27db8b09eb92c46e76d5a856d4dc816aadb811042a79f81646a3ddfc1940"
+    }
+  }
+}

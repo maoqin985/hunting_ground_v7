@@ -9,21 +9,61 @@ from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 import time
 
+from .tushare_mcp import TushareMCPClient
+
 logger = logging.getLogger(__name__)
 
 
 class TushareFetcher:
     """Tushare Pro 数据获取器"""
 
-    def __init__(self, token: str = "", database=None):
+    def __init__(self, token: str = "", database=None, mcp_url: str = ""):
         self.db = database
         self._token = token or os.getenv("TUSHARE_TOKEN", "")
+        self._mcp_url = (mcp_url or os.getenv("TUSHARE_MCP_URL", "")).strip()
+        self._mcp = (
+            TushareMCPClient(self._mcp_url, self._token)
+            if self._mcp_url and self._token else None
+        )
         self._pro = None
         self._rate_limit = 200  # 每分钟请求上限
         self._request_times = []
 
-        if self._token:
+        if self._token and not self._mcp:
             self._init_client()
+
+    @property
+    def available(self) -> bool:
+        """Whether an MCP or legacy SDK client is configured."""
+        return bool(self._mcp or self._pro)
+
+    def set_token(self, token: str):
+        """Update credentials without persisting or logging the secret."""
+        self._token = (token or "").strip()
+        self._pro = None
+        self._mcp = (
+            TushareMCPClient(self._mcp_url, self._token)
+            if self._mcp_url and self._token else None
+        )
+        if self._token and not self._mcp:
+            self._init_client()
+
+    async def close(self):
+        if self._mcp:
+            await self._mcp.close()
+
+    async def _mcp_rows(self, tool: str, arguments: Dict) -> List[Dict]:
+        if not self._mcp:
+            return []
+        value = await self._mcp.call_tool(tool, arguments)
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            # A few MCP implementations wrap rows in data/rows.
+            value = value.get("data", value.get("rows", value))
+        if not isinstance(value, list):
+            return []
+        return [row for row in value if isinstance(row, dict)]
 
     def _init_client(self):
         try:
@@ -47,9 +87,63 @@ class TushareFetcher:
 
     async def sync_stock_basic(self):
         """同步全市场股票基本信息"""
+        if self._mcp:
+            try:
+                rows = await self._mcp_rows(
+                    "stock_basic",
+                    {
+                        "list_status": "L",
+                        "fields": ["ts_code", "name", "industry", "market", "list_date"],
+                    },
+                )
+                trade_date = datetime.now().strftime("%Y%m%d")
+                try:
+                    basics = await self._mcp_rows(
+                        "daily_basic",
+                        {
+                            "trade_date": trade_date,
+                            "fields": ["ts_code", "total_mv"],
+                        },
+                    )
+                except Exception as exc:
+                    # The list endpoint is still useful when daily_basic is
+                    # outside the account's permission tier or unavailable on
+                    # a non-trading day.  Store zero market cap and let the
+                    # next scheduled sync fill it in.
+                    logger.warning("Tushare MCP daily basic unavailable: %s", exc)
+                    basics = []
+                by_code = {str(row.get("ts_code")): row for row in basics}
+                stocks = []
+                for row in rows:
+                    code = str(row.get("ts_code", ""))
+                    if not code:
+                        continue
+                    mv = by_code.get(code, {}).get("total_mv", 0) or 0
+                    try:
+                        market_cap = float(mv) / 10000.0  # Tushare total_mv: 10k yuan -> 亿元
+                    except (TypeError, ValueError):
+                        market_cap = 0.0
+                    name = str(row.get("name", ""))
+                    stocks.append({
+                        "ts_code": code,
+                        "name": name,
+                        "industry": str(row.get("industry", "") or ""),
+                        "market_cap": market_cap,
+                        "list_date": str(row.get("list_date", "") or ""),
+                        "is_st": 1 if "ST" in name.upper() else 0,
+                        "updated_at": datetime.now().isoformat(),
+                    })
+                if stocks and self.db:
+                    self.db.upsert_stock_basic(stocks)
+                logger.info("Tushare MCP: synced %s stock basics", len(stocks))
+                return len(stocks)
+            except Exception as exc:
+                logger.warning("Tushare MCP stock list failed: %s", exc)
+                return 0
+
         if not self._pro:
             logger.warning("Tushare client not available")
-            return
+            return 0
 
         self._rate_limit_check()
         try:
@@ -88,11 +182,77 @@ class TushareFetcher:
             if stocks:
                 self.db.upsert_stock_basic(stocks)
                 logger.info(f"Synced {len(stocks)} stock basic records")
+                return len(stocks)
         except Exception as e:
             logger.error(f"Stock basic sync error: {e}")
+        return 0
 
     async def sync_daily_kline(self, ts_codes: List[str] = None) -> int:
         """增量同步日K线"""
+        if self._mcp:
+            if ts_codes is None:
+                ts_codes = self.db.get_all_codes() if self.db else []
+                if not ts_codes:
+                    await self.sync_stock_basic()
+                    stocks = self.db.get_stocks_by_market_cap(0, 10000) if self.db else []
+                    ts_codes = [s["ts_code"] for s in stocks]
+            if not ts_codes:
+                return 0
+
+            latest_date = self.db.get_latest_kline_date() if self.db else None
+            start_date = (
+                (datetime.strptime(latest_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
+                if latest_date else "20200101"
+            )
+            end_date = datetime.now().strftime("%Y%m%d")
+            if start_date >= end_date:
+                return 0
+
+            total = 0
+            # Tushare's daily endpoint has a 6,000-row response limit. Three
+            # stocks across roughly six years stay below that limit while
+            # still reducing calls compared with one request per stock.
+            for offset in range(0, len(ts_codes), 3):
+                batch = ts_codes[offset:offset + 3]
+                try:
+                    rows = await self._mcp_rows(
+                        "daily",
+                        {
+                            "ts_code": ",".join(batch),
+                            "start_date": start_date,
+                            "end_date": end_date,
+                            "fields": [
+                                "ts_code", "trade_date", "open", "high", "low", "close",
+                                "vol", "amount", "pct_chg",
+                            ],
+                        },
+                    )
+                    normalized = []
+                    for row in rows:
+                        try:
+                            normalized.append({
+                                "ts_code": str(row.get("ts_code", "")),
+                                "trade_date": datetime.strptime(str(row["trade_date"]), "%Y%m%d").strftime("%Y-%m-%d"),
+                                "open": float(row.get("open", 0) or 0),
+                                "high": float(row.get("high", 0) or 0),
+                                "low": float(row.get("low", 0) or 0),
+                                "close": float(row.get("close", 0) or 0),
+                                "volume": float(row.get("vol", 0) or 0),
+                                "amount": float(row.get("amount", 0) or 0),
+                                "turnover_rate": 0.0,
+                                "volume_ratio": 1.0,
+                                "rsi_14": 50.0,
+                                "change_pct": float(row.get("pct_chg", 0) or 0),
+                            })
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                    if normalized and self.db:
+                        total += self.db.upsert_kline(normalized)
+                except Exception as exc:
+                    logger.warning("Tushare MCP kline batch failed: %s", exc)
+            logger.info("Tushare MCP: synced %s kline rows", total)
+            return total
+
         if not self._pro:
             logger.warning("Tushare client not available")
             return 0
@@ -165,6 +325,23 @@ class TushareFetcher:
 
     async def get_daily_basic(self, trade_date: str = None):
         """获取每日指标（市值、换手率、量比等）"""
+        if self._mcp:
+            trade_date = trade_date or datetime.now().strftime("%Y%m%d")
+            try:
+                return await self._mcp_rows(
+                    "daily_basic",
+                    {
+                        "trade_date": trade_date,
+                        "fields": [
+                            "ts_code", "trade_date", "close", "turnover_rate",
+                            "volume_ratio", "pe", "pe_ttm", "pb", "total_mv", "circ_mv",
+                        ],
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Tushare MCP daily basic failed: %s", exc)
+                return []
+
         if not self._pro:
             return None
 
@@ -180,6 +357,95 @@ class TushareFetcher:
         except Exception as e:
             logger.error(f"Daily basic fetch error: {e}")
             return None
+
+    async def get_realtime_quotes(self, ts_codes: List[str]) -> Dict[str, Dict]:
+        """Fetch real-time stock snapshots through the MCP ``rt_k`` tool."""
+        if not self._mcp or not ts_codes:
+            return {}
+        try:
+            rows = await self._mcp_rows(
+                "rt_k",
+                {
+                    "ts_code": ",".join(ts_codes),
+                    "fields": [
+                        "ts_code", "name", "pre_close", "high", "open", "low",
+                        "close", "vol", "amount", "trade_time",
+                    ],
+                },
+            )
+        except Exception as exc:
+            logger.debug("Tushare MCP realtime failed: %s", exc)
+            return {}
+
+        result: Dict[str, Dict] = {}
+        for row in rows:
+            code = str(row.get("ts_code", ""))
+            if not code:
+                continue
+            try:
+                price = float(row.get("close", 0) or 0)
+                pre_close = float(row.get("pre_close", 0) or 0)
+                change = price - pre_close
+                change_pct = change / pre_close * 100 if pre_close else 0.0
+                result[code] = {
+                    "name": row.get("name", ""),
+                    "price": price,
+                    "open": float(row.get("open", 0) or 0),
+                    "high": float(row.get("high", 0) or 0),
+                    "low": float(row.get("low", 0) or 0),
+                    "volume": float(row.get("vol", 0) or 0),
+                    "amount": float(row.get("amount", 0) or 0),
+                    "change": change,
+                    "change_pct": float(row.get("pct_chg", change_pct) or change_pct),
+                    "turnover_rate": float(row.get("turnover_rate", 0) or 0),
+                    "volume_ratio": float(row.get("volume_ratio", 1) or 1),
+                    "time": row.get("trade_time", ""),
+                }
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    async def get_index_quotes(self) -> Dict[str, Dict]:
+        """Fetch the latest index observations from Tushare ``index_daily``."""
+        if not self._mcp:
+            return {}
+        indices = {
+            "000001.SH": "上证指数",
+            "399001.SZ": "深证成指",
+            "000300.SH": "沪深300",
+            "399006.SZ": "创业板指",
+        }
+        result: Dict[str, Dict] = {}
+        end_date = datetime.now().strftime("%Y%m%d")
+        for code, name in indices.items():
+            try:
+                rows = await self._mcp_rows(
+                    "index_daily",
+                    {
+                        "ts_code": code,
+                        "end_date": end_date,
+                        "fields": [
+                            "ts_code", "trade_date", "close", "pre_close",
+                            "change", "pct_chg", "vol", "amount",
+                        ],
+                    },
+                )
+                if not rows:
+                    continue
+                row = rows[0]
+                result[name] = {
+                    "code": code,
+                    "name": name,
+                    "price": float(row.get("close", 0) or 0),
+                    "change": float(row.get("change", 0) or 0),
+                    "change_pct": float(row.get("pct_chg", 0) or 0),
+                    "volume": float(row.get("vol", 0) or 0),
+                    "amount": float(row.get("amount", 0) or 0),
+                    "time": row.get("trade_date", ""),
+                }
+            except Exception as exc:
+                logger.debug("Tushare MCP index %s failed: %s", code, exc)
+        return result
 
     async def calculate_indicators_batch(self, ts_codes: List[str]):
         """批量计算技术指标（RSI/MACD/布林/均线/回撤）- 收盘后调用"""

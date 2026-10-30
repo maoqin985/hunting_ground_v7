@@ -1,5 +1,5 @@
 """
-猎场系统 V6.0 — 五层递进熔断系统
+猎场系统 V7.0 — 五层递进熔断系统（per-account）
 L1: 个股硬止损 -5%  →  立即平仓
 L2: 个股日损 -3%    →  次日禁止该股
 L3: 组合日损 -4%    →  禁止新开仓
@@ -15,11 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 class CircuitBreaker:
-    """五层递进熔断控制器"""
+    """五层递进熔断控制器（per-account）"""
 
-    def __init__(self, config: dict = None, db=None):
+    def __init__(self, config: dict = None, db=None, account_id: str = None):
         self.config = config or {}
         self.db = db
+        self.account_id = account_id  # V7.0: per-account scope
         self._active_breakers: Dict[int, Dict] = {}
         self._stock_ban_list: Dict[str, datetime] = {}  # 个股禁买截止时间
 
@@ -33,7 +34,7 @@ class CircuitBreaker:
         self._daily_reset_time = datetime.now().replace(hour=0, minute=0, second=0)
         self._weekly_reset_time = datetime.now().replace(hour=0, minute=0, second=0)
 
-    def check_all(self) -> Dict:
+    def check_all(self, account_id: str = None) -> Dict:
         """
         检查所有熔断层
 
@@ -60,7 +61,7 @@ class CircuitBreaker:
                 # 解析熔断
                 if self.db:
                     self.db.resolve_circuit_breaker(breaker.get('db_id'))
-                logger.info(f"Circuit breaker L{level} ({breaker['name']}) COOLDOWN EXPIRED — auto resumed")
+                logger.info(f"[{self.account_id}] Circuit breaker L{level} ({breaker['name']}) COOLDOWN EXPIRED — auto resumed")
                 continue
 
             result['active_breakers'].append({
@@ -146,7 +147,8 @@ class CircuitBreaker:
 
         # 记数据库
         if self.db:
-            db_id = self.db.log_circuit_breaker(level, breaker['name'], reason, action)
+            db_id = self.db.log_circuit_breaker(level, breaker['name'], reason, action,
+                                                account_id=self.account_id)
             breaker['db_id'] = db_id
 
         self._active_breakers[level] = breaker
@@ -177,4 +179,29 @@ class CircuitBreaker:
                 for l, b in self._active_breakers.items()
             ],
             'banned_stocks': list(self._stock_ban_list.keys()),
+        }
+
+    def get_dashboard_status(self) -> Dict:
+        """供 Web 面板的完整熔断状态（含冷却倒计时、禁买名单、触发原因）。"""
+        now = datetime.now()
+        return {
+            'active_count': len(self._active_breakers),
+            'breakers': [
+                {
+                    'level': l,
+                    'name': b['name'],
+                    'action': b['action'],
+                    'trigger_reason': b.get('trigger_reason', ''),
+                    'triggered_at': b['triggered_at'].isoformat() if b.get('triggered_at') else None,
+                    'remaining_cooldown_seconds': (
+                        max(0, int((b['cooldown_end'] - now).total_seconds()))
+                        if b.get('cooldown_end') else None
+                    ),
+                }
+                for l, b in self._active_breakers.items()
+            ],
+            'banned_stocks': [
+                {'ts_code': c, 'until': t.isoformat()}
+                for c, t in self._stock_ban_list.items()
+            ],
         }

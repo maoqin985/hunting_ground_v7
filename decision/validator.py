@@ -69,16 +69,24 @@ class SignalValidator:
         # === L1: 市值过滤 ===
         if stock_info:
             mc = stock_info.get('market_cap', 0) or 0
-            if mc < 10 or mc > 50:
-                result.reject("L1-市值过滤", f"市值{mc:.0f}亿不在10-50亿区间")
+            cap_min = self._layers.get(1, {}).get('market_cap_min', 10)
+            cap_max = self._layers.get(1, {}).get('market_cap_max', 50)
+            if mc < cap_min or mc > cap_max:
+                result.reject("L1-市值过滤", f"市值{mc:.0f}亿不在{cap_min:g}-{cap_max:g}亿区间")
                 return result
 
         # === L2: 数据完整性 ===
         required = ['rsi', 'turnover_rate', 'volume_ratio', 'max_drawdown']
-        kline = signal.get('details', {}).get('kline', signal.get('details', {}))
+        # 融合信号: details 可能在 signal['details'] 或嵌套在 signal['signals'][0]['details']
+        details = signal.get('details', {})
+        if not details and signal.get('signals'):
+            # 从第一个子信号提取 details (已在 v7_launcher 中补全)
+            first_sig = signal['signals'][0]
+            details = first_sig.get('details', {})
+            signal['details'] = details  # 缓存给后续层使用
         missing = []
         for field in required:
-            if field not in signal.get('details', {}) and field not in (kline or {}):
+            if field not in details:
                 missing.append(field)
         if missing:
             result.reject("L2-数据完整性", f"缺失指标: {','.join(missing)}")
@@ -96,13 +104,14 @@ class SignalValidator:
 
         # === L4: 涨停过滤 ===
         change_pct = signal.get('details', {}).get('change_pct', 0)
-        if change_pct >= 9.0:
+        max_change_pct = self._layers.get(4, {}).get('max_change_pct', 9.0)
+        if change_pct >= max_change_pct:
             result.reject("L4-涨停过滤", f"涨幅{change_pct:.1f}%不追涨停板")
             return result
 
         # === L5: 评分过滤 ===
         score = signal.get('score', 0)
-        min_score = self._layers.get(5, {}).get('min_score', 40)
+        min_score = self._layers.get(5, {}).get('min_score', 5)
         if score < min_score:
             result.reject("L5-评分过滤", f"评分{score:.0f}<{min_score}禁止买入")
             return result
@@ -110,11 +119,22 @@ class SignalValidator:
         # === L6: 宏观情绪 ===
         if market_data:
             fg = market_data.get('fear_greed', 50)
-            if fg < 20:
-                result.warn(f"L6-宏观情绪: 极度恐惧({fg})，注意风险")
-            elif fg > 80:
-                result.reject("L6-宏观情绪", f"极度贪婪({fg})，暂停买入")
-                return result
+            l6 = self._layers.get(6, {})
+            fg_min = l6.get('fear_greed_min', 20)
+            fg_max = l6.get('fear_greed_max', 80)
+            reject_mode = l6.get('action', 'warn') == 'reject'
+            if fg < fg_min:
+                msg = f"L6-宏观情绪: 极度恐惧({fg})，注意风险"
+                if reject_mode:
+                    result.reject("L6-宏观情绪", f"极度恐惧({fg})，暂停买入")
+                    return result
+                result.warn(msg)
+            elif fg > fg_max:
+                msg = f"L6-宏观情绪: 极度贪婪({fg})，暂停买入"
+                if reject_mode:
+                    result.reject("L6-宏观情绪", f"极度贪婪({fg})，暂停买入")
+                    return result
+                result.warn(msg)
 
         # === L7: 新闻研判 ===
         neg_stocks = []
@@ -130,7 +150,7 @@ class SignalValidator:
             return result
 
         name = stock_info.get('name', '') if stock_info else ''
-        blacklist_keywords = ['ST', '*ST', '退市']
+        blacklist_keywords = self._layers.get(8, {}).get('blacklist_keywords', ['ST', '*ST', '退市'])
         for kw in blacklist_keywords:
             if kw in name:
                 result.reject("L8-基本面黑名单", f"名称含'{kw}'")
@@ -149,13 +169,15 @@ class SignalValidator:
             return result
 
         # === L11: AI风险分类（新增） ===
-        if ai_risk_prob >= 0.60:
+        ai_threshold = self._layers.get(11, {}).get('catboost_risk_threshold', 0.60)
+        if ai_risk_prob >= ai_threshold:
             result.reject("L11-AI风险分类", f"AI预测5日大跌概率{ai_risk_prob:.0%}")
             return result
 
         # === L12: 流动性检查（新增） ===
         daily_amount = signal.get('details', {}).get('daily_amount', 0)
-        if daily_amount < 2000:  # 日均成交额<2000万
+        min_daily_amount = self._layers.get(12, {}).get('min_daily_amount', 3000)
+        if daily_amount < min_daily_amount:  # 日均成交额不足（万元）
             result.reject("L12-流动性检查", f"日均成交额{daily_amount:.0f}万，流动性不足")
             return result
 
@@ -166,8 +188,8 @@ class SignalValidator:
         """快速检查（仅关键层）"""
         # L4: 涨停
         # L5: 评分
-        if score < 40:
-            return False, f"评分{score:.0f}<40"
+        if score < 5:
+            return False, f"评分{score:.0f}<5"
 
         # L8: ST
         if stock_info and stock_info.get('is_st'):

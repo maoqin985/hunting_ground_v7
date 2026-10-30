@@ -31,7 +31,7 @@ signal_defense:
       action: "reject"
     - id: 5
       name: "评分过滤"
-      min_score: 40
+      min_score: 5
       action: "reject"
     - id: 6
       name: "宏观情绪"

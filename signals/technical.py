@@ -27,6 +27,9 @@ class TechnicalScanner(BaseScanner):
             if len(kline) < 20:
                 continue
 
+            # 补全缺失的技术指标 (Tencent免费接口不提供RSI/MACD/布林)
+            self._ensure_indicators(kline)
+
             details = {}
 
             # ---- RSI 超卖信号 ----
@@ -78,9 +81,9 @@ class TechnicalScanner(BaseScanner):
         latest = kline[-1]
         rsi = latest.get('rsi_14', 50)
         if rsi and rsi <= self.rsi_oversold:
-            # RSI越低，信号越强
-            strength = (self.rsi_oversold - rsi) / self.rsi_oversold * 50 + 25
-            return {'rsi': rsi, 'strength': min(strength, 70)}
+            # RSI越低，信号越强 (RSI=20时约50分, RSI=10时约70分)
+            strength = (self.rsi_oversold - rsi) / self.rsi_oversold * 80 + 30
+            return {'rsi': rsi, 'strength': min(strength, 90)}
         return None
 
     def _check_macd_golden_cross(self, kline: List[Dict]) -> Dict:
@@ -93,7 +96,7 @@ class TechnicalScanner(BaseScanner):
         curr_hist = curr.get('macd_hist', 0) or 0
 
         if prev_hist < 0 and curr_hist > 0:
-            return {'prev_hist': prev_hist, 'curr_hist': curr_hist, 'strength': 50}
+            return {'prev_hist': prev_hist, 'curr_hist': curr_hist, 'strength': 65}
         return None
 
     def _check_bollinger_bounce(self, kline: List[Dict]) -> Dict:
@@ -103,7 +106,7 @@ class TechnicalScanner(BaseScanner):
         lower = latest.get('boll_lower', 0)
         if lower and close > 0 and close <= lower * 1.02:
             bounce_pct = (close / lower - 1) * 100
-            return {'close': close, 'lower': lower, 'bounce_pct': bounce_pct, 'strength': 40}
+            return {'close': close, 'lower': lower, 'bounce_pct': bounce_pct, 'strength': 55}
         return None
 
     def _check_v_pattern(self, kline: List[Dict]) -> Dict:
@@ -124,7 +127,7 @@ class TechnicalScanner(BaseScanner):
         recovery = (right_high / valley - 1) * 100
 
         if decline <= self.v_decline_min and recovery >= self.v_recovery_min:
-            strength = min(abs(decline) + recovery, 80)
+            strength = min(abs(decline) * 1.5 + recovery * 2, 85)
             return {'decline_pct': decline, 'recovery_pct': recovery, 'strength': strength}
         return None
 
@@ -135,7 +138,7 @@ class TechnicalScanner(BaseScanner):
         lows = [r['low'] for r in kline[-7:]]
         mid = lows[3]
         if mid < lows[2] and mid < lows[4] and mid < lows[1] and mid < lows[5]:
-            return {'fractal_low': mid, 'strength': 35}
+            return {'fractal_low': mid, 'strength': 50}
         return None
 
     def _calculate_score(self, details: Dict, kline: List[Dict]) -> float:
@@ -166,3 +169,50 @@ class TechnicalScanner(BaseScanner):
         if 'bottom_fractal' in details:
             reasons.append("底分型")
         return ' + '.join(reasons)
+
+    def _ensure_indicators(self, kline: List[Dict]):
+        """补全缺失的技术指标: RSI(14), MACD, Bollinger(20,2)"""
+        closes = [r.get('close', 0) for r in kline]
+        highs = [r.get('high', 0) for r in kline]
+        lows = [r.get('low', 0) for r in kline]
+
+        # RSI-14
+        if any(r.get('rsi_14', 0) == 50.0 for r in kline[-20:]):
+            for i in range(14, len(kline)):
+                gains = sum(max(closes[j] - closes[j-1], 0) for j in range(i-13, i+1))
+                losses = sum(max(closes[j-1] - closes[j], 0) for j in range(i-13, i+1))
+                avg_gain = gains / 14
+                avg_loss = losses / 14
+                if avg_loss == 0:
+                    kline[i]['rsi_14'] = 100.0
+                else:
+                    rs = avg_gain / avg_loss
+                    kline[i]['rsi_14'] = round(100.0 - 100.0 / (1.0 + rs), 1)
+
+        # MACD (12, 26, 9)
+        if any(r.get('macd_hist', 0) == 0 for r in kline[-5:]):
+            ema12 = closes[0]
+            ema26 = closes[0]
+            macd_vals = []
+            for i, c in enumerate(closes):
+                ema12 = c * 2/(12+1) + ema12 * (1 - 2/(12+1))
+                ema26 = c * 2/(26+1) + ema26 * (1 - 2/(26+1))
+                dif = ema12 - ema26
+                macd_vals.append(dif)
+                kline[i]['macd_dif'] = round(dif, 4)
+
+            signal = macd_vals[0]
+            for i, dif in enumerate(macd_vals):
+                signal = dif * 2/(9+1) + signal * (1 - 2/(9+1))
+                kline[i]['macd_hist'] = round(dif - signal, 4)
+
+        # Bollinger (20, 2)
+        if any(r.get('boll_lower', 0) == 0 for r in kline[-5:]):
+            for i in range(19, len(kline)):
+                window = closes[i-19:i+1]
+                ma = sum(window) / 20
+                variance = sum((c - ma)**2 for c in window) / 20
+                std = variance ** 0.5
+                kline[i]['boll_mid'] = round(ma, 2)
+                kline[i]['boll_upper'] = round(ma + 2 * std, 2)
+                kline[i]['boll_lower'] = round(ma - 2 * std, 2)

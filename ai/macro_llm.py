@@ -6,6 +6,7 @@
 
 import logging
 import json
+import os
 from typing import Optional, Dict, List
 from datetime import datetime
 
@@ -29,7 +30,12 @@ class MacroLLM:
         cloud_cfg = llm_cfg.get("cloud", {})
         self._cloud_provider = cloud_cfg.get("provider", "deepseek")
         self._cloud_model = cloud_cfg.get("model", "deepseek-chat")
-        self._cloud_api_key = cloud_cfg.get("api_key", "")
+        configured_key = str(cloud_cfg.get("api_key", "") or "").strip()
+        # Credentials are supplied at runtime.  A YAML placeholder must never
+        # be treated as a real key or sent to DeepSeek.
+        self._cloud_api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        if not self._cloud_api_key and configured_key and not configured_key.startswith("${"):
+            self._cloud_api_key = configured_key
         self._cloud_api_base = cloud_cfg.get("api_base", "https://api.deepseek.com/v1")
         self._cloud_fallback = cloud_cfg.get("fallback", True)
 

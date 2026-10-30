@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <defs>
+    <linearGradient id="wingGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3987e5"/>
+      <stop offset="100%" stop-color="#1a5cb0"/>
+    </linearGradient>
+    <linearGradient id="candleGrad" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#199e70"/>
+      <stop offset="100%" stop-color="#2bd08f"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 外圈：瞄准环（精准猎取） -->
+  <circle cx="120" cy="120" r="104" fill="none" stroke="#3987e5" stroke-width="6" opacity="0.9"/>
+  <circle cx="120" cy="120" r="92" fill="none" stroke="#3987e5" stroke-width="1.5" opacity="0.35"/>
+
+  <!-- 十字准星刻度（橙色，象征捕捉机会） -->
+  <line x1="120" y1="8"  x2="120" y2="26" stroke="#d95926" stroke-width="5" stroke-linecap="round"/>
+  <line x1="120" y1="214" x2="120" y2="232" stroke="#d95926" stroke-width="5" stroke-linecap="round"/>
+  <line x1="8"  y1="120" x2="26" y2="120" stroke="#d95926" stroke-width="5" stroke-linecap="round"/>
+  <line x1="214" y1="120" x2="232" y2="120" stroke="#d95926" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- 猎鹰展翅：几何折线（蓝→深蓝渐变） -->
+  <path d="M120 168 L88 96 L120 118 L152 96 Z" fill="url(#wingGrad)" opacity="0.92"/>
+  <path d="M120 168 L70 108 L96 104 L120 118 Z" fill="#3987e5" opacity="0.35"/>
+  <path d="M120 168 L170 108 L144 104 L120 118 Z" fill="#3987e5" opacity="0.35"/>
+
+  <!-- 上升K线（绿色渐变，象征持续盈利） -->
+  <g stroke-linecap="round">
+    <!-- 第1根K线 -->
+    <line x1="96"  y1="158" x2="96"  y2="184" stroke="#199e70" stroke-width="3"/>
+    <rect x="89"  y="164" width="14" height="18" rx="2" fill="url(#candleGrad)"/>
+    <!-- 第2根K线 -->
+    <line x1="116" y1="150" x2="116" y2="184" stroke="#199e70" stroke-width="3"/>
+    <rect x="109" y="158" width="14" height="24" rx="2" fill="url(#candleGrad)"/>
+    <!-- 第3根K线 -->
+    <line x1="136" y1="140" x2="136" y2="184" stroke="#199e70" stroke-width="3"/>
+    <rect x="129" y="150" width="14" height="32" rx="2" fill="url(#candleGrad)"/>
+  </g>
+
+  <!-- 神经网络节点（AI 智能体） -->
+  <g fill="#ffffff">
+    <circle cx="60"  cy="64"  r="5" opacity="0.9"/>
+    <circle cx="180" cy="64"  r="5" opacity="0.9"/>
+    <circle cx="60"  cy="176" r="5" opacity="0.9"/>
+    <circle cx="180" cy="176" r="5" opacity="0.9"/>
+  </g>
+  <g fill="none" stroke="#c3c2b7" stroke-width="1.2" opacity="0.45">
+    <line x1="60" y1="64"  x2="88"  y2="96"/>
+    <line x1="180" y1="64" x2="152" y2="96"/>
+    <line x1="60" y1="176" x2="96"  y2="158"/>
+    <line x1="180" y1="176" x2="144" y2="158"/>
+  </g>
+
+  <!-- 中心星点（AI 之眼） -->
+  <circle cx="120" cy="118" r="4" fill="#d95926"/>
+</svg>

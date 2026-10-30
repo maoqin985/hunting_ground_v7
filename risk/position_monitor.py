@@ -1,5 +1,5 @@
 """
-猎场系统 V6.0 — 持仓实时监控
+猎场系统 V7.0 — 持仓实时监控（per-account）
 追踪持仓变化、计算组合风险指标
 """
 
@@ -12,15 +12,17 @@ logger = logging.getLogger(__name__)
 
 
 class PositionMonitor:
-    """持仓监控与组合风险分析"""
+    """持仓监控与组合风险分析（per-account）"""
 
-    def __init__(self, config: dict = None, db=None, data_gateway=None):
+    def __init__(self, config: dict = None, db=None, data_gateway=None,
+                 account_id: str = None, total_capital: float = None):
         self.config = config or {}
         self.db = db
         self.gateway = data_gateway
+        self.account_id = account_id  # V7.0: per-account scope
 
         cap_cfg = config.get("capital", {})
-        self.total_capital = cap_cfg.get("total", 20000.0)
+        self.total_capital = total_capital or cap_cfg.get("total", 20000.0)
 
         # 当日/当周初始资金（用于计算日/周盈亏）
         self._day_start_value = self.total_capital
@@ -32,7 +34,7 @@ class PositionMonitor:
 
     async def update(self) -> Dict:
         """更新持仓状态并返回组合摘要"""
-        positions = self.db.get_all_positions()
+        positions = self.db.get_all_positions(account_id=self.account_id)
 
         # 获取实时行情
         codes = [p['ts_code'] for p in positions]
@@ -56,6 +58,7 @@ class PositionMonitor:
                     ts_code, pos.get('name', ''),
                     pos['volume'], pos['avg_cost'],
                     current_price, pos.get('buy_date', ''),
+                    account_id=self.account_id,
                 )
 
                 total_position_value += market_value
@@ -68,6 +71,7 @@ class PositionMonitor:
                     'market_value': market_value,
                     'pnl': round(pnl, 2),
                     'pnl_pct': round(pnl_pct, 2),
+                    'change_pct': quote.get('change_pct', 0),
                     'hold_days': pos.get('hold_days', 0),
                 })
 
@@ -122,7 +126,7 @@ class PositionMonitor:
                 'total_pnl': summary['total_pnl'],
                 'total_pnl_pct': summary['total_pnl_pct'],
                 'position_count': summary['position_count'],
-            })
+            }, account_id=self.account_id)
 
         return summary
 
@@ -136,7 +140,7 @@ class PositionMonitor:
 
     def _calculate_cash(self, positions: List[Dict]) -> float:
         """计算剩余现金（从交易记录推算）"""
-        trades = self.db.get_trades()
+        trades = self.db.get_trades(account_id=self.account_id)
         cash = self.total_capital
         for t in trades:
             if t['direction'] == 'buy':

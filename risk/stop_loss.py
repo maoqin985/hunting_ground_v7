@@ -1,5 +1,5 @@
 """
-猎场系统 V6.0 — 实时止损监控
+猎场系统 V7.0 — 实时止损监控（per-account）
 每60秒检查持仓，触发止损立即平仓
 """
 
@@ -18,11 +18,13 @@ class StopLossMonitor:
     - 支持硬止损 + 移动止损
     """
 
-    def __init__(self, config: dict = None, db=None, data_gateway=None, circuit_breaker=None):
+    def __init__(self, config: dict = None, db=None, data_gateway=None, circuit_breaker=None,
+                 account_id: str = None):
         self.config = config or {}
         self.db = db
         self.gateway = data_gateway
         self.circuit_breaker = circuit_breaker
+        self.account_id = account_id  # V7.0: per-account scope
 
         sl_cfg = config.get("stop_loss", {})
         a_share_cfg = sl_cfg.get("a_share", {})
@@ -39,7 +41,7 @@ class StopLossMonitor:
 
     async def check_all(self) -> List[Dict]:
         """检查所有持仓，返回需平仓的列表"""
-        positions = self.db.get_all_positions()
+        positions = self.db.get_all_positions(account_id=self.account_id)
         if not positions:
             return []
 
